@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>締切カウントダウン</title>
+<meta name="theme-color" content="#1b2f52">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-512.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg:#f4fafd; --ink:#1b2f52; --accent:#1b87d8; --card:#fff; --muted:#5a6b80; --past:#9aa7b5; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; }
+  header { padding:20px 16px 8px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { margin:0; color:var(--muted); font-size:13px; }
+  main { padding:8px 16px 32px; max-width:640px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid #dbe7f0; border-radius:14px; padding:14px 16px; margin:12px 0; }
+  .card.past { opacity:.65; }
+  .card .name { font-size:16px; font-weight:700; }
+  .card .date { font-size:12px; color:var(--muted); margin-top:2px; }
+  .count { font-size:32px; font-weight:800; color:var(--accent); margin-top:6px; line-height:1.1; }
+  .count small { font-size:14px; font-weight:600; color:var(--ink); }
+  .count.past { color:var(--past); font-size:22px; }
+  .row { display:flex; gap:8px; margin-top:10px; }
+  button { font:inherit; cursor:pointer; }
+  .del { margin-left:auto; background:none; border:1px solid #dbe7f0; border-radius:8px; color:var(--muted); padding:4px 10px; font-size:12px; }
+  form.add { background:var(--card); border:1px dashed #9cc3e0; border-radius:14px; padding:14px 16px; margin-top:16px; }
+  form.add label { display:block; font-size:13px; margin:8px 0 4px; }
+  form.add input { width:100%; font:inherit; padding:8px; border:1px solid #c9d8e4; border-radius:8px; }
+  form.add button { margin-top:12px; background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:700; width:100%; }
+  footer { text-align:center; color:var(--muted); font-size:11px; padding:0 16px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⏳ 締切カウントダウン</h1>
+  <p class="sub">ライブと試験の締切まで、あと何日かだけを見る小さなアプリ。データはこの端末の中だけに保存します。</p>
+</header>
+<main>
+  <div id="list"></div>
+  <form class="add" id="addForm">
+    <strong>締切を追加</strong>
+    <label for="name">名前（公開されても困らないものだけ）</label>
+    <input id="name" required maxlength="60" placeholder="例：Ms.OOJA 2次プレオーダー締切">
+    <label for="when">日時</label>
+    <input id="when" type="datetime-local" required>
+    <button type="submit">追加する</button>
+  </form>
+</main>
+<footer>オフラインでも開けます ／ 通知は届きません。開いて確認する形です。</footer>
+<script>
+const KEY = "deadline-countdown-v1";
+// 初期値：公開されても困らない締切だけ。時刻が「頃」「日付のみ」のものは注記つき。
+const SEED = [
+  { name: "Ms.OOJA 2次プレオーダー締切", when: "2026-11-15T23:59:00+09:00", note: "" },
+  { name: "milet 大分公演（iichikoグランシアタ）", when: "2026-11-22T00:00:00+09:00", note: "日付のみ・時刻は未確認" },
+  { name: "ANISAMA FUKUOKA 2027 当落発表", when: "2026-12-03T18:00:00+09:00", note: "18時頃" },
+  { name: "ANISAMA FUKUOKA 2027 支払期限", when: "2026-12-06T23:59:00+09:00", note: "" },
+  { name: "YouTube Music Premium 最終確認", when: "2026-12-10T10:43:00+09:00", note: "" },
+  { name: "G検定 2027年第1回 申込締切", when: "2027-01-08T23:59:00+09:00", note: "" },
+  { name: "G検定 2027年第1回 試験", when: "2027-01-16T13:00:00+09:00", note: "" },
+  { name: "ANISAMA FUKUOKA 2027 DAY1", when: "2027-03-13T00:00:00+09:00", note: "日付のみ・時刻は未確認" },
+  { name: "Ms.OOJA Zepp Tour 2027（Zepp Fukuoka）", when: "2027-04-03T00:00:00+09:00", note: "日付のみ・時刻は未確認" }
+];
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  localStorage.setItem(KEY, JSON.stringify(SEED));
+  return SEED.slice();
+}
+function save(items) { localStorage.setItem(KEY, JSON.stringify(items)); }
+function fmtDate(d) {
+  return d.getFullYear() + "年" + (d.getMonth()+1) + "月" + d.getDate() + "日 " +
+    String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+}
+function render() {
+  const items = load().slice().sort((a,b) => new Date(a.when) - new Date(b.when));
+  const now = new Date();
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  items.forEach((it, idx) => {
+    const target = new Date(it.when);
+    const diff = target - now;
+    const card = document.createElement("div");
+    card.className = "card" + (diff < 0 ? " past" : "");
+    const name = document.createElement("div");
+    name.className = "name"; name.textContent = it.name;
+    const date = document.createElement("div");
+    date.className = "date";
+    date.textContent = fmtDate(target) + (it.note ? "（" + it.note + "）" : "");
+    const count = document.createElement("div");
+    if (diff < 0) {
+      count.className = "count past"; count.textContent = "終了しました";
+    } else {
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor(diff % 86400000 / 3600000);
+      const mins = Math.floor(diff % 3600000 / 60000);
+      count.className = "count";
+      count.innerHTML = "あと " + days + "日 <small>" + hours + "時間 " + mins + "分</small>";
+    }
+    const row = document.createElement("div");
+    row.className = "row";
+    const del = document.createElement("button");
+    del.className = "del"; del.type = "button"; del.textContent = "削除";
+    del.onclick = () => {
+      const all = load().filter(x => !(x.name === it.name && x.when === it.when));
+      save(all); render();
+    };
+    row.appendChild(del);
+    card.append(name, date, count, row);
+    list.appendChild(card);
+  });
+}
+document.getElementById("addForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = document.getElementById("name").value.trim();
+  const whenRaw = document.getElementById("when").value;
+  if (!name || !whenRaw) return;
+  const items = load();
+  items.push({ name, when: new Date(whenRaw).toISOString(), note: "" });
+  save(items);
+  e.target.reset();
+  render();
+});
+render();
+setInterval(render, 60000);
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+</script>
+</body>
+</html>
